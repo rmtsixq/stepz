@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "915678337102",
+    "project_id": "stepz-eb9c8",
+    "storage_bucket": "stepz-eb9c8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:915678337102:android:13ea8c16fb15bbe1f04b1f",
+        "android_client_info": {
+          "package_name": "com.stepz.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANUvIJGVqm092WiNZQpy19r32LsT2M3IU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
