@@ -8,19 +8,36 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../context/AuthContext';
 import { useSteps } from '../context/StepContext';
 
 const { width, height } = Dimensions.get('window');
 
 const HomeScreen = () => {
-  const { userProfile } = useAuth();
-  const { todaySteps, getTotalSteps, badges, badgeDefinitions, getNextBadge, formatNumber } = useSteps();
+  const { userProfile, fetchUserProfile } = useAuth();
+  const { 
+    todaySteps, 
+    getTotalSteps, 
+    badges, 
+    badgeDefinitions, 
+    getNextBadge, 
+    formatNumber,
+    getDailyProgress,
+    getWeeklyAverage,
+    weeklySteps,
+    stepGoal,
+    events,
+    loadLeaderboards
+  } = useSteps();
+  
   const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -59,31 +76,124 @@ const HomeScreen = () => {
     );
     pulseAnimation.start();
 
-    return () => pulseAnimation.stop();
+    // Update time every minute
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+
+    return () => {
+      pulseAnimation.stop();
+      clearInterval(timeInterval);
+    };
   }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate refresh
-    setTimeout(() => {
+    try {
+      if (userProfile) {
+        await fetchUserProfile(userProfile.uid);
+        await loadLeaderboards();
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
       setRefreshing(false);
-    }, 1000);
+    }
   };
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
+    const hour = currentTime.getHours();
+    if (hour < 6) return 'İyi geceler';
     if (hour < 12) return 'Günaydın';
-    if (hour < 18) return 'İyi öğlen';
-    return 'İyi akşamlar';
+    if (hour < 17) return 'İyi öğlen';
+    if (hour < 21) return 'İyi akşamlar';
+    return 'İyi geceler';
   };
 
-  const getProgressPercentage = () => {
-    const nextBadge = getNextBadge();
-    if (!nextBadge) return 100;
-    return Math.min((getTotalSteps() / nextBadge.steps) * 100, 100);
+  const getMotivationalMessage = () => {
+    const progress = getDailyProgress();
+    
+    if (progress >= 100) {
+      return 'Tebrikler! Günlük hedefini tamamladın! 🎉';
+    } else if (progress >= 75) {
+      return 'Çok yakın! Son sprint! 💪';
+    } else if (progress >= 50) {
+      return 'Yarı yoldasın! Devam et! 🔥';
+    } else if (progress >= 25) {
+      return 'İyi bir başlangıç! Hızını artır! ⚡';
+    } else {
+      return 'Harekete geç! Her adım önemli! 🚀';
+    }
+  };
+
+  const getActiveEvents = () => {
+    const now = new Date();
+    return events.filter(event => {
+      const start = new Date(event.startDate);
+      const end = new Date(event.endDate);
+      return now >= start && now <= end && event.isActive;
+    }).slice(0, 2); // Show max 2 active events
+  };
+
+  const getUserRank = () => {
+    // This would come from leaderboards context in a real implementation
+    return Math.floor(Math.random() * 50) + 1; // Placeholder
   };
 
   const nextBadge = getNextBadge();
+  const activeEvents = getActiveEvents();
+  const dailyProgress = getDailyProgress();
+
+  // Prepare chart data
+  const chartData = {
+    labels: weeklySteps.map(day => day.day),
+    datasets: [
+      {
+        data: weeklySteps.map(day => day.steps),
+        color: (opacity = 1) => `rgba(79, 70, 229, ${opacity})`,
+        strokeWidth: 3,
+      },
+    ],
+  };
+
+  const renderWeeklyChart = () => {
+    if (weeklySteps.length === 0) {
+      return (
+        <View style={styles.chartPlaceholder}>
+          <Ionicons name="bar-chart-outline" size={48} color="#9CA3AF" />
+          <Text style={styles.chartPlaceholderText}>
+            Veri toplanıyor...
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <LineChart
+        data={chartData}
+        width={width - 60}
+        height={200}
+        chartConfig={{
+          backgroundColor: 'transparent',
+          backgroundGradientFrom: '#ffffff',
+          backgroundGradientTo: '#ffffff',
+          decimalPlaces: 0,
+          color: (opacity = 1) => `rgba(79, 70, 229, ${opacity})`,
+          labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
+          style: {
+            borderRadius: 16,
+          },
+          propsForDots: {
+            r: '4',
+            strokeWidth: '2',
+            stroke: '#4F46E5',
+          },
+        }}
+        bezier
+        style={styles.chart}
+      />
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -105,7 +215,13 @@ const HomeScreen = () => {
           <View style={styles.welcomeSection}>
             <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.userName}>{userProfile?.name || 'Atlet'}!</Text>
-            <Text style={styles.subtitle}>Bugün kaç adım atacaksın?</Text>
+            <Text style={styles.subtitle}>
+              {currentTime.toLocaleDateString('tr-TR', { 
+                weekday: 'long', 
+                day: 'numeric', 
+                month: 'long' 
+              })}
+            </Text>
           </View>
           
           <View style={styles.logoSection}>
@@ -119,7 +235,12 @@ const HomeScreen = () => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#4F46E5']}
+            tintColor="#4F46E5"
+          />
         }
       >
         <Animated.View
@@ -139,7 +260,7 @@ const HomeScreen = () => {
             ]}
           >
             <LinearGradient
-              colors={['#F59E0B', '#EAB308']}
+              colors={dailyProgress >= 100 ? ['#10B981', '#059669'] : ['#F59E0B', '#EAB308']}
               style={styles.stepCardGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -149,29 +270,112 @@ const HomeScreen = () => {
                 <Text style={styles.stepCardTitle}>Bugünkü Adımlar</Text>
               </View>
               <Text style={styles.stepCount}>{formatNumber(todaySteps)}</Text>
-              <Text style={styles.stepSubtitle}>Harika gidiyorsun! 🔥</Text>
+              <Text style={styles.stepSubtitle}>{getMotivationalMessage()}</Text>
+              
+              {/* Daily Progress Bar */}
+              <View style={styles.dailyProgressContainer}>
+                <View style={styles.dailyProgressBar}>
+                  <Animated.View
+                    style={[
+                      styles.dailyProgressFill,
+                      { width: `${Math.min(dailyProgress, 100)}%` },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.dailyProgressText}>
+                  {Math.round(dailyProgress)}% of {formatNumber(stepGoal)}
+                </Text>
+              </View>
             </LinearGradient>
           </Animated.View>
 
-          {/* Total Steps Card */}
-          <View style={styles.totalStepsCard}>
-            <LinearGradient
-              colors={['#10B981', '#059669']}
-              style={styles.cardGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.cardHeader}>
-                <Ionicons name="trophy" size={24} color="white" />
-                <Text style={styles.cardTitle}>Toplam Adım</Text>
-              </View>
-              <Text style={styles.cardValue}>{formatNumber(getTotalSteps())}</Text>
-            </LinearGradient>
+          {/* Quick Stats Row */}
+          <View style={styles.quickStatsRow}>
+            <View style={styles.quickStatItem}>
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                style={styles.quickStatGradient}
+              >
+                <Ionicons name="trophy" size={20} color="white" />
+                <Text style={styles.quickStatValue}>{formatNumber(getTotalSteps())}</Text>
+                <Text style={styles.quickStatLabel}>Toplam Adım</Text>
+              </LinearGradient>
+            </View>
+            
+            <View style={styles.quickStatItem}>
+              <LinearGradient
+                colors={['#8B5CF6', '#7C3AED']}
+                style={styles.quickStatGradient}
+              >
+                <Ionicons name="ribbon" size={20} color="white" />
+                <Text style={styles.quickStatValue}>{badges.length}</Text>
+                <Text style={styles.quickStatLabel}>Rozetler</Text>
+              </LinearGradient>
+            </View>
+            
+            <View style={styles.quickStatItem}>
+              <LinearGradient
+                colors={['#F59E0B', '#EAB308']}
+                style={styles.quickStatGradient}
+              >
+                <Ionicons name="trending-up" size={20} color="white" />
+                <Text style={styles.quickStatValue}>#{getUserRank()}</Text>
+                <Text style={styles.quickStatLabel}>Sıralama</Text>
+              </LinearGradient>
+            </View>
           </View>
+
+          {/* Weekly Chart */}
+          <View style={styles.chartSection}>
+            <Text style={styles.sectionTitle}>📈 Haftalık Grafik</Text>
+            <View style={styles.chartCard}>
+              {renderWeeklyChart()}
+              <View style={styles.chartInfo}>
+                <Text style={styles.chartInfoText}>
+                  Haftalık Ortalama: {formatNumber(getWeeklyAverage())} adım
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Active Events */}
+          {activeEvents.length > 0 && (
+            <View style={styles.eventsSection}>
+              <Text style={styles.sectionTitle}>🔥 Aktif Etkinlikler</Text>
+              {activeEvents.map((event, index) => (
+                <TouchableOpacity
+                  key={event.id}
+                  style={styles.eventCard}
+                  onPress={() => Alert.alert(event.title, event.description)}
+                >
+                  <LinearGradient
+                    colors={['#EC4899', '#BE185D']}
+                    style={styles.eventCardGradient}
+                  >
+                    <View style={styles.eventHeader}>
+                      <Text style={styles.eventTitle}>{event.title}</Text>
+                      <Ionicons name="chevron-forward" size={20} color="white" />
+                    </View>
+                    <Text style={styles.eventDescription} numberOfLines={2}>
+                      {event.description}
+                    </Text>
+                    {event.multiplier && (
+                      <Text style={styles.eventBonus}>
+                        🎁 {((event.multiplier - 1) * 100).toFixed(0)}% Bonus!
+                      </Text>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {/* Badges Section */}
           <View style={styles.badgesSection}>
-            <Text style={styles.sectionTitle}>🏆 Rozetlerim</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>🏆 Rozetlerim</Text>
+              <Text style={styles.badgeCount}>{badges.length}/{badgeDefinitions.length}</Text>
+            </View>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -186,6 +390,14 @@ const HomeScreen = () => {
                       styles.badgeItem,
                       { opacity: isEarned ? 1 : 0.4 },
                     ]}
+                    onPress={() => {
+                      if (isEarned) {
+                        Alert.alert(
+                          `${badge.emoji} ${badge.name}`,
+                          `Tebrikler! ${formatNumber(badge.steps)} adımla bu rozeti kazandın!`
+                        );
+                      }
+                    }}
                   >
                     <View
                       style={[
@@ -211,9 +423,12 @@ const HomeScreen = () => {
               <Text style={styles.sectionTitle}>🎯 Sonraki Hedef</Text>
               <View style={styles.progressCard}>
                 <View style={styles.progressHeader}>
-                  <Text style={styles.progressBadgeName}>{nextBadge.name}</Text>
+                  <View style={styles.progressBadgeInfo}>
+                    <Text style={styles.progressBadgeEmoji}>{nextBadge.emoji}</Text>
+                    <Text style={styles.progressBadgeName}>{nextBadge.name}</Text>
+                  </View>
                   <Text style={styles.progressPercentage}>
-                    {Math.round(getProgressPercentage())}%
+                    {Math.round((getTotalSteps() / nextBadge.steps) * 100)}%
                   </Text>
                 </View>
                 <View style={styles.progressBarContainer}>
@@ -221,7 +436,7 @@ const HomeScreen = () => {
                     <Animated.View
                       style={[
                         styles.progressFill,
-                        { width: `${getProgressPercentage()}%` },
+                        { width: `${Math.min((getTotalSteps() / nextBadge.steps) * 100, 100)}%` },
                       ]}
                     />
                   </View>
@@ -229,28 +444,33 @@ const HomeScreen = () => {
                 <Text style={styles.progressText}>
                   {formatNumber(getTotalSteps())} / {formatNumber(nextBadge.steps)} adım
                 </Text>
+                <Text style={styles.progressRemaining}>
+                  {formatNumber(Math.max(nextBadge.steps - getTotalSteps(), 0))} adım kaldı!
+                </Text>
               </View>
             </View>
           )}
 
-          {/* Quick Stats */}
-          <View style={styles.quickStats}>
-            <Text style={styles.sectionTitle}>📊 Hızlı İstatistikler</Text>
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Ionicons name="school" size={20} color="#4F46E5" />
-                <Text style={styles.statLabel}>Sınıf</Text>
-                <Text style={styles.statValue}>{userProfile?.class || '-'}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Ionicons name="library" size={20} color="#7C3AED" />
-                <Text style={styles.statLabel}>Seviye</Text>
-                <Text style={styles.statValue}>{userProfile?.grade || '-'}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Ionicons name="ribbon" size={20} color="#EC4899" />
-                <Text style={styles.statLabel}>Rozet</Text>
-                <Text style={styles.statValue}>{badges.length}</Text>
+          {/* User Info Stats */}
+          <View style={styles.userInfoSection}>
+            <Text style={styles.sectionTitle}>� Profilim</Text>
+            <View style={styles.userInfoCard}>
+              <View style={styles.userInfoRow}>
+                <View style={styles.userInfoItem}>
+                  <Ionicons name="school" size={20} color="#4F46E5" />
+                  <Text style={styles.userInfoLabel}>Sınıf</Text>
+                  <Text style={styles.userInfoValue}>{userProfile?.class || '-'}</Text>
+                </View>
+                <View style={styles.userInfoItem}>
+                  <Ionicons name="library" size={20} color="#7C3AED" />
+                  <Text style={styles.userInfoLabel}>Seviye</Text>
+                  <Text style={styles.userInfoValue}>{userProfile?.grade || '-'}</Text>
+                </View>
+                <View style={styles.userInfoItem}>
+                  <Ionicons name="calendar" size={20} color="#EC4899" />
+                  <Text style={styles.userInfoLabel}>Yaş</Text>
+                  <Text style={styles.userInfoValue}>{userProfile?.age || '-'}</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -258,7 +478,7 @@ const HomeScreen = () => {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>
-              StepZ ile adım at, yarış! 
+              StepZ ile adım at, yarış! 🏃‍♂️
             </Text>
             <Text style={styles.footerCredit}>Made with ❤️ by RUMET ASAN</Text>
           </View>
@@ -297,6 +517,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   subtitle: {
     fontSize: 14,
@@ -348,41 +571,69 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   stepSubtitle: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 15,
+    textAlign: 'center',
   },
-  totalStepsCard: {
+  dailyProgressContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  dailyProgressBar: {
+    width: '80%',
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  dailyProgressFill: {
+    height: '100%',
+    backgroundColor: 'white',
+    borderRadius: 3,
+  },
+  dailyProgressText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  quickStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 20,
+  },
+  quickStatItem: {
+    flex: 1,
+    marginHorizontal: 5,
     borderRadius: 15,
     overflow: 'hidden',
     elevation: 4,
-    shadowColor: '#10B981',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  cardGradient: {
-    padding: 20,
-  },
-  cardHeader: {
-    flexDirection: 'row',
+  quickStatGradient: {
+    padding: 15,
     alignItems: 'center',
-    marginBottom: 10,
   },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 8,
-  },
-  cardValue: {
-    fontSize: 28,
+  quickStatValue: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
+    marginTop: 5,
+    marginBottom: 2,
   },
-  badgesSection: {
+  quickStatLabel: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  chartSection: {
     marginBottom: 20,
   },
   sectionTitle: {
@@ -390,6 +641,90 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1F2937',
     marginBottom: 15,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  badgeCount: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  chartCard: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 15,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    alignItems: 'center',
+  },
+  chart: {
+    borderRadius: 16,
+  },
+  chartPlaceholder: {
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartPlaceholderText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  chartInfo: {
+    marginTop: 10,
+  },
+  chartInfoText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  eventsSection: {
+    marginBottom: 20,
+  },
+  eventCard: {
+    marginBottom: 10,
+    borderRadius: 15,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#EC4899',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  eventCardGradient: {
+    padding: 15,
+  },
+  eventHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    flex: 1,
+  },
+  eventDescription: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 8,
+  },
+  eventBonus: {
+    fontSize: 12,
+    color: '#FFD700',
+    fontWeight: 'bold',
+  },
+  badgesSection: {
+    marginBottom: 20,
   },
   badgesContainer: {
     paddingRight: 20,
@@ -406,6 +741,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   badgeEmoji: {
     fontSize: 24,
@@ -441,13 +781,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 15,
   },
+  progressBadgeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressBadgeEmoji: {
+    fontSize: 24,
+    marginRight: 10,
+  },
   progressBadgeName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#374151',
   },
   progressPercentage: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#4F46E5',
   },
@@ -455,65 +803,74 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   progressBar: {
-    height: 8,
+    height: 10,
     backgroundColor: '#E5E7EB',
-    borderRadius: 4,
+    borderRadius: 5,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     backgroundColor: '#4F46E5',
-    borderRadius: 4,
+    borderRadius: 5,
   },
   progressText: {
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
+    marginBottom: 5,
   },
-  quickStats: {
+  progressRemaining: {
+    fontSize: 12,
+    color: '#F59E0B',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  userInfoSection: {
     marginBottom: 20,
   },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statItem: {
+  userInfoCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 5,
+    borderRadius: 15,
+    padding: 20,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
-  statLabel: {
+  userInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  userInfoItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  userInfoLabel: {
     fontSize: 12,
     color: '#6B7280',
     marginTop: 5,
     marginBottom: 2,
   },
-  statValue: {
+  userInfoValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: '#374151',
   },
   footer: {
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 30,
+    paddingHorizontal: 20,
   },
   footerText: {
     fontSize: 16,
-    color: '#6B7280',
+    fontWeight: 'bold',
+    color: '#374151',
     marginBottom: 5,
   },
   footerCredit: {
     fontSize: 12,
     color: '#9CA3AF',
-    fontStyle: 'italic',
   },
 });
 

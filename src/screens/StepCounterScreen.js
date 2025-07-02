@@ -26,11 +26,18 @@ const StepCounterScreen = () => {
     stopStepTracking,
     saveStepsToFirestore,
     formatNumber,
+    getDailyProgress,
+    stepGoal,
+    getNextBadge,
+    badgeDefinitions,
+    badges,
+    getWeeklyAverage,
   } = useSteps();
   
   const [sessionSteps, setSessionSteps] = useState(0);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [trackingInterval, setTrackingInterval] = useState(null);
+  const [sessionDuration, setSessionDuration] = useState(0);
 
   // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -95,12 +102,30 @@ const StepCounterScreen = () => {
     }
   }, [isTracking]);
 
+  useEffect(() => {
+    let durationInterval;
+    if (isTracking && sessionStartTime) {
+      durationInterval = setInterval(() => {
+        const now = new Date();
+        const duration = Math.floor((now - sessionStartTime) / 1000);
+        setSessionDuration(duration);
+      }, 1000);
+    }
+
+    return () => {
+      if (durationInterval) {
+        clearInterval(durationInterval);
+      }
+    };
+  }, [isTracking, sessionStartTime]);
+
   const handleStartTracking = async () => {
     try {
       const interval = await startStepTracking();
       setTrackingInterval(interval);
       setSessionStartTime(new Date());
-      setSessionSteps(0);
+      setSessionSteps(dailySteps); // Set initial session steps to current daily steps
+      setSessionDuration(0);
 
       // Scale animation for start
       Animated.sequence([
@@ -118,7 +143,7 @@ const StepCounterScreen = () => {
 
       Alert.alert(
         '🚀 Adım Sayma Başladı!',
-        'Artık adımların sayılıyor. Yürümeye başla!',
+        'Artık adımların sayılıyor. Yürümeye başla ve hedefine ulaş!',
         [{ text: 'Tamam', style: 'default' }]
       );
     } catch (error) {
@@ -126,25 +151,35 @@ const StepCounterScreen = () => {
     }
   };
 
-  const handleStopTracking = () => {
+  const handleStopTracking = async () => {
     stopStepTracking();
     if (trackingInterval) {
       clearInterval(trackingInterval);
       setTrackingInterval(null);
     }
 
-    // Save session steps
-    if (sessionSteps > 0) {
-      saveStepsToFirestore(sessionSteps);
+    // Calculate session steps
+    const sessionStepsCount = dailySteps - sessionSteps;
+
+    // Save session data
+    if (sessionStepsCount > 0) {
+      await saveStepsToFirestore();
       Alert.alert(
         '✅ Oturum Tamamlandı!',
-        `Bu oturumda ${formatNumber(sessionSteps)} adım attın! Harika iş!`,
+        `Bu oturumda ${formatNumber(sessionStepsCount)} adım attın!\n\nSüre: ${formatDuration(sessionDuration)}\nHarika iş! 🎉`,
+        [{ text: 'Tamam', style: 'default' }]
+      );
+    } else {
+      Alert.alert(
+        '⏸️ Oturum Durduruldu',
+        'Oturum durduruldu. Hareket etmeye devam et!',
         [{ text: 'Tamam', style: 'default' }]
       );
     }
 
     setSessionStartTime(null);
     setSessionSteps(0);
+    setSessionDuration(0);
 
     // Scale animation for stop
     Animated.sequence([
@@ -161,16 +196,38 @@ const StepCounterScreen = () => {
     ]).start();
   };
 
-  const getSessionDuration = () => {
-    if (!sessionStartTime) return '00:00';
-    const now = new Date();
-    const diff = Math.floor((now - sessionStartTime) / 1000);
-    const minutes = Math.floor(diff / 60);
-    const seconds = diff % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const formatDuration = (seconds) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}s ${minutes}d ${secs}sn`;
+    } else if (minutes > 0) {
+      return `${minutes}d ${secs}sn`;
+    } else {
+      return `${secs}sn`;
+    }
+  };
+
+  const getSessionStepsCount = () => {
+    if (!sessionStartTime) return 0;
+    return Math.max(dailySteps - sessionSteps, 0);
   };
 
   const getMotivationalMessage = () => {
+    const progress = getDailyProgress();
+    const nextBadge = getNextBadge();
+    
+    if (progress >= 100) {
+      return 'Günlük hedefini tamamladın! 🎉';
+    } else if (nextBadge) {
+      const remaining = nextBadge.steps - (todaySteps);
+      if (remaining <= 100) {
+        return `${nextBadge.emoji} ${remaining} adım kaldı!`;
+      }
+    }
+    
     const messages = [
       'Her adım bir zafer! 🏆',
       'Sen harikasın! 💪',
@@ -237,6 +294,11 @@ const StepCounterScreen = () => {
                 />
                 <Text style={styles.stepCount}>{formatNumber(dailySteps)}</Text>
                 <Text style={styles.stepLabel}>Bugünkü Adım</Text>
+                
+                {/* Daily Progress Ring */}
+                <View style={styles.progressRing}>
+                  <Text style={styles.progressText}>{Math.round(getDailyProgress())}%</Text>
+                </View>
               </LinearGradient>
             </Animated.View>
           </View>
@@ -245,14 +307,14 @@ const StepCounterScreen = () => {
           {isTracking && (
             <Animated.View style={styles.sessionInfo}>
               <View style={styles.sessionCard}>
-                <Text style={styles.sessionTitle}>Aktif Oturum</Text>
+                <Text style={styles.sessionTitle}>🔥 Aktif Oturum</Text>
                 <View style={styles.sessionStats}>
                   <View style={styles.sessionStat}>
-                    <Text style={styles.sessionStatValue}>{formatNumber(sessionSteps)}</Text>
+                    <Text style={styles.sessionStatValue}>{formatNumber(getSessionStepsCount())}</Text>
                     <Text style={styles.sessionStatLabel}>Bu Oturum</Text>
                   </View>
                   <View style={styles.sessionStat}>
-                    <Text style={styles.sessionStatValue}>{getSessionDuration()}</Text>
+                    <Text style={styles.sessionStatValue}>{formatDuration(sessionDuration)}</Text>
                     <Text style={styles.sessionStatLabel}>Süre</Text>
                   </View>
                 </View>
@@ -268,9 +330,12 @@ const StepCounterScreen = () => {
                 colors={['rgba(255, 255, 255, 0.15)', 'rgba(255, 255, 255, 0.05)']}
                 style={styles.statCardGradient}
               >
-                <Ionicons name="calendar-outline" size={24} color="white" />
-                <Text style={styles.statValue}>{formatNumber(todaySteps)}</Text>
-                <Text style={styles.statLabel}>Bugün Toplam</Text>
+                <Ionicons name="target-outline" size={24} color="white" />
+                <Text style={styles.statValue}>{formatNumber(stepGoal)}</Text>
+                <Text style={styles.statLabel}>Günlük Hedef</Text>
+                <View style={styles.progressIndicator}>
+                  <View style={[styles.progressBar, { width: `${Math.min(getDailyProgress(), 100)}%` }]} />
+                </View>
               </LinearGradient>
             </View>
 
@@ -279,9 +344,20 @@ const StepCounterScreen = () => {
                 colors={['rgba(255, 255, 255, 0.15)', 'rgba(255, 255, 255, 0.05)']}
                 style={styles.statCardGradient}
               >
-                <Ionicons name="person-outline" size={24} color="white" />
-                <Text style={styles.statValue}>{userProfile?.class || '-'}</Text>
-                <Text style={styles.statLabel}>Sınıf</Text>
+                <Ionicons name="trending-up-outline" size={24} color="white" />
+                <Text style={styles.statValue}>{formatNumber(getWeeklyAverage())}</Text>
+                <Text style={styles.statLabel}>Haftalık Ort.</Text>
+              </LinearGradient>
+            </View>
+
+            <View style={styles.statCard}>
+              <LinearGradient
+                colors={['rgba(255, 255, 255, 0.15)', 'rgba(255, 255, 255, 0.05)']}
+                style={styles.statCardGradient}
+              >
+                <Ionicons name="ribbon-outline" size={24} color="white" />
+                <Text style={styles.statValue}>{badges.length}</Text>
+                <Text style={styles.statLabel}>Rozetler</Text>
               </LinearGradient>
             </View>
           </View>
@@ -324,9 +400,10 @@ const StepCounterScreen = () => {
           <View style={styles.tipsContainer}>
             <Text style={styles.tipsTitle}>💡 İpuçları</Text>
             <Text style={styles.tipsText}>
-              • Adım saymayı başlattıktan sonra telefonu cebinde taşı{'\n'}
-              • Düzenli yürüyüş yap ve hedefine ulaş{'\n'}
-              • Arkadaşlarınla yarış ve liderlik tablosunda yerini al!
+              • {getDailyProgress() < 50 ? 'Günün ilk yarısında aktif ol!' : 'Harika gidiyorsun, devam et!'}{'\n'}
+              • Düzenli ara verme ve su içmeyi unutma{'\n'}
+              • Arkadaşlarınla yarış ve liderlik tablosunda yerini al!{'\n'}
+              • {getNextBadge() ? `${getNextBadge().emoji} ${getNextBadge().name} rozetine çok yakınsın!` : 'Tüm rozetleri topladın, tebrikler! 🎉'}
             </Text>
           </View>
         </Animated.View>
@@ -512,6 +589,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.9)',
     lineHeight: 20,
+  },
+  progressRing: {
+    position: 'absolute',
+    bottom: 15,
+    right: 15,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  progressIndicator: {
+    width: '100%',
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: 'white',
+    borderRadius: 2,
   },
 });
 

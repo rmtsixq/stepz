@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,14 +20,10 @@ const { width, height } = Dimensions.get('window');
 
 const LeaderboardScreen = () => {
   const { userProfile } = useAuth();
-  const { formatNumber } = useSteps();
+  const { formatNumber, leaderboards, loadLeaderboards } = useSteps();
   const [activeTab, setActiveTab] = useState('individual');
   const [refreshing, setRefreshing] = useState(false);
-  const [leaderboardData, setLeaderboardData] = useState({
-    individual: [],
-    class: [],
-    grade: [],
-  });
+  const [loading, setLoading] = useState(true);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -52,45 +49,21 @@ const LeaderboardScreen = () => {
     loadLeaderboardData();
   }, []);
 
-  const loadLeaderboardData = () => {
-    // Simulate leaderboard data - In real app, fetch from Firebase
-    const mockIndividualData = [
-      { id: '1', name: 'Ahmet Kaya', class: '10A', totalSteps: 45230, rank: 1 },
-      { id: '2', name: 'Zeynep Demir', class: '9B', totalSteps: 42150, rank: 2 },
-      { id: '3', name: 'Mehmet Öz', class: '11C', totalSteps: 39840, rank: 3 },
-      { id: '4', name: 'Ayşe Yılmaz', class: '10B', totalSteps: 37920, rank: 4 },
-      { id: '5', name: 'Can Arslan', class: '9A', totalSteps: 35600, rank: 5 },
-      { id: '6', name: userProfile?.name || 'Sen', class: userProfile?.class || '9A', totalSteps: 25000, rank: 8 },
-    ];
-
-    const mockClassData = [
-      { id: '1', className: '10A', avgSteps: 38500, studentCount: 28, rank: 1 },
-      { id: '2', className: '9B', avgSteps: 36200, studentCount: 30, rank: 2 },
-      { id: '3', className: '11C', avgSteps: 34800, studentCount: 25, rank: 3 },
-      { id: '4', className: '10B', avgSteps: 33100, studentCount: 27, rank: 4 },
-      { id: '5', className: userProfile?.class || '9A', avgSteps: 31500, studentCount: 29, rank: 5 },
-    ];
-
-    const mockGradeData = [
-      { id: '1', grade: '10', avgSteps: 35800, classCount: 4, rank: 1 },
-      { id: '2', grade: '11', avgSteps: 34200, classCount: 3, rank: 2 },
-      { id: '3', grade: '9', avgSteps: 32900, classCount: 5, rank: 3 },
-      { id: '4', grade: '12', avgSteps: 30100, classCount: 2, rank: 4 },
-    ];
-
-    setLeaderboardData({
-      individual: mockIndividualData,
-      class: mockClassData,
-      grade: mockGradeData,
-    });
+  const loadLeaderboardData = async () => {
+    setLoading(true);
+    try {
+      await loadLeaderboards();
+    } catch (error) {
+      console.error('Error loading leaderboard data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    loadLeaderboardData();
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadLeaderboardData();
+    setRefreshing(false);
   };
 
   const handleTabPress = (tab) => {
@@ -133,7 +106,7 @@ const LeaderboardScreen = () => {
 
   const isCurrentUser = (item) => {
     if (activeTab === 'individual') {
-      return item.name === userProfile?.name;
+      return item.uid === userProfile?.uid;
     } else if (activeTab === 'class') {
       return item.className === userProfile?.class;
     } else if (activeTab === 'grade') {
@@ -144,7 +117,7 @@ const LeaderboardScreen = () => {
 
   const renderIndividualItem = (item, index) => (
     <Animated.View
-      key={item.id}
+      key={item.id || item.uid}
       style={[
         styles.leaderboardItem,
         isCurrentUser(item) && styles.currentUserItem,
@@ -169,23 +142,29 @@ const LeaderboardScreen = () => {
       
       <View style={styles.playerInfo}>
         <Text style={[styles.playerName, isCurrentUser(item) && styles.currentUserText]}>
-          {item.name}
+          {item.name || 'Anonim Kullanıcı'}
         </Text>
-        <Text style={styles.playerClass}>{item.class}</Text>
+        <Text style={styles.playerClass}>{item.class || 'Sınıf Belirtilmemiş'}</Text>
       </View>
       
       <View style={styles.stepsInfo}>
         <Text style={[styles.stepsCount, isCurrentUser(item) && styles.currentUserText]}>
-          {formatNumber(item.totalSteps)}
+          {formatNumber(item.totalSteps || 0)}
         </Text>
         <Text style={styles.stepsLabel}>adım</Text>
       </View>
+      
+      {isCurrentUser(item) && (
+        <View style={styles.currentUserBadge}>
+          <Ionicons name="person" size={16} color="#4F46E5" />
+        </View>
+      )}
     </Animated.View>
   );
 
   const renderClassItem = (item, index) => (
     <Animated.View
-      key={item.id}
+      key={item.className}
       style={[
         styles.leaderboardItem,
         isCurrentUser(item) && styles.currentUserItem,
@@ -221,12 +200,18 @@ const LeaderboardScreen = () => {
         </Text>
         <Text style={styles.stepsLabel}>ort. adım</Text>
       </View>
+      
+      {isCurrentUser(item) && (
+        <View style={styles.currentUserBadge}>
+          <Ionicons name="school" size={16} color="#4F46E5" />
+        </View>
+      )}
     </Animated.View>
   );
 
   const renderGradeItem = (item, index) => (
     <Animated.View
-      key={item.id}
+      key={item.grade}
       style={[
         styles.leaderboardItem,
         isCurrentUser(item) && styles.currentUserItem,
@@ -253,7 +238,7 @@ const LeaderboardScreen = () => {
         <Text style={[styles.playerName, isCurrentUser(item) && styles.currentUserText]}>
           {item.grade}. Sınıf
         </Text>
-        <Text style={styles.playerClass}>{item.classCount} sınıf</Text>
+        <Text style={styles.playerClass}>{item.studentCount} öğrenci</Text>
       </View>
       
       <View style={styles.stepsInfo}>
@@ -262,20 +247,71 @@ const LeaderboardScreen = () => {
         </Text>
         <Text style={styles.stepsLabel}>ort. adım</Text>
       </View>
+      
+      {isCurrentUser(item) && (
+        <View style={styles.currentUserBadge}>
+          <Ionicons name="library" size={16} color="#4F46E5" />
+        </View>
+      )}
     </Animated.View>
   );
 
   const renderContent = () => {
+    const currentData = leaderboards[activeTab] || [];
+    
+    if (loading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4F46E5" />
+          <Text style={styles.loadingText}>Liderlik tablosu yükleniyor...</Text>
+        </View>
+      );
+    }
+
+    if (currentData.length === 0) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="trophy-outline" size={64} color="#9CA3AF" />
+          <Text style={styles.emptyTitle}>Henüz veri yok</Text>
+          <Text style={styles.emptyText}>
+            {activeTab === 'individual' && 'Henüz hiçbir kullanıcı adım atmamış.'}
+            {activeTab === 'class' && 'Henüz sınıf verileri mevcut değil.'}
+            {activeTab === 'grade' && 'Henüz seviye verileri mevcut değil.'}
+          </Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+            <Text style={styles.refreshButtonText}>Yenile</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     switch (activeTab) {
       case 'individual':
-        return leaderboardData.individual.map(renderIndividualItem);
+        return currentData.map(renderIndividualItem);
       case 'class':
-        return leaderboardData.class.map(renderClassItem);
+        return currentData.map(renderClassItem);
       case 'grade':
-        return leaderboardData.grade.map(renderGradeItem);
+        return currentData.map(renderGradeItem);
       default:
         return null;
     }
+  };
+
+  const getCurrentUserRank = () => {
+    const currentData = leaderboards[activeTab] || [];
+    
+    if (activeTab === 'individual') {
+      const userEntry = currentData.find(item => item.uid === userProfile?.uid);
+      return userEntry ? userEntry.rank : null;
+    } else if (activeTab === 'class') {
+      const classEntry = currentData.find(item => item.className === userProfile?.class);
+      return classEntry ? classEntry.rank : null;
+    } else if (activeTab === 'grade') {
+      const gradeEntry = currentData.find(item => item.grade === userProfile?.grade);
+      return gradeEntry ? gradeEntry.rank : null;
+    }
+    
+    return null;
   };
 
   const tabIndicatorTranslateX = tabIndicatorAnim.interpolate({
@@ -302,6 +338,15 @@ const LeaderboardScreen = () => {
         >
           <Text style={styles.title}>Liderlik Tablosu</Text>
           <Text style={styles.subtitle}>Sıralamada yerini gör! - by rumet</Text>
+          
+          {/* Current User Rank Display */}
+          {getCurrentUserRank() && (
+            <View style={styles.userRankContainer}>
+              <Text style={styles.userRankText}>
+                Senin sıran: #{getCurrentUserRank()}
+              </Text>
+            </View>
+          )}
         </Animated.View>
       </LinearGradient>
 
@@ -381,7 +426,12 @@ const LeaderboardScreen = () => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#4F46E5']}
+            tintColor="#4F46E5"
+          />
         }
       >
         <View style={styles.leaderboardContainer}>
@@ -426,6 +476,19 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 10,
+  },
+  userRankContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  userRankText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   tabContainer: {
     backgroundColor: 'white',
@@ -485,6 +548,7 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     borderWidth: 1,
     borderColor: '#F3F4F6',
+    position: 'relative',
   },
   currentUserItem: {
     backgroundColor: '#EEF2FF',
@@ -502,12 +566,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   rankText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: 'white',
   },
   playerInfo: {
     flex: 1,
+    marginRight: 10,
   },
   playerName: {
     fontSize: 16,
@@ -523,17 +588,75 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   stepsCount: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#1F2937',
-    marginBottom: 2,
   },
   stepsLabel: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#6B7280',
+    marginTop: 2,
   },
   currentUserText: {
     color: '#4F46E5',
+  },
+  currentUserBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#374151',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 40,
+  },
+  refreshButton: {
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  refreshButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   footer: {
     alignItems: 'center',
@@ -542,14 +665,13 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 16,
-    color: '#6B7280',
+    fontWeight: 'bold',
+    color: '#374151',
     marginBottom: 5,
-    textAlign: 'center',
   },
   footerCredit: {
     fontSize: 12,
     color: '#9CA3AF',
-    fontStyle: 'italic',
   },
 });
 
